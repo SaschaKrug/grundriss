@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Grundriss - Möbelplaner</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', sans-serif; background: #1a1a2e; color: #eee; display: flex; height: 100vh; overflow: hidden; }
+
+  .sidebar {
+    width: 220px; min-width: 220px; background: #16213e; padding: 16px; display: flex; flex-direction: column; gap: 8px;
+    border-right: 1px solid #0f3460; overflow-y: auto;
+  }
+  .sidebar h2 { font-size: 14px; color: #e94560; margin: 8px 0 4px; text-transform: uppercase; letter-spacing: 1px; }
+  .sidebar h1 { font-size: 16px; margin-bottom: 12px; color: #fff; }
+
+  .furniture-item {
+    background: #0f3460; border: 1px solid #e94560; border-radius: 6px; padding: 8px 10px;
+    cursor: grab; font-size: 12px; display: flex; justify-content: space-between; align-items: center;
+    transition: background .15s;
+  }
+  .furniture-item:hover { background: #1a4a7a; }
+  .furniture-item:active { cursor: grabbing; }
+  .dim { color: #999; font-size: 11px; }
+
+  .main { flex: 1; display: flex; flex-direction: column; align-items: center; padding: 15px; overflow-y: auto; }
+
+  .controls { display: flex; gap: 10px; margin-bottom: 8px; }
+  .controls button {
+    background: #0f3460; border: 1px solid #e94560; color: #eee; padding: 5px 12px;
+    border-radius: 4px; cursor: pointer; font-size: 11px;
+  }
+  .controls button:hover { background: #e94560; }
+  .controls button.active { background: #e94560; }
+
+  .room-wrapper { margin-bottom: 20px; }
+  .room-title { font-size: 13px; color: #e94560; margin-bottom: 6px; text-align: center; font-weight: bold; letter-spacing: 1px; }
+  .room-container { position: relative; background: #f5f0e8; border: 3px solid #333; box-shadow: 0 0 20px rgba(233,69,96,.2); }
+
+  .wall-label { position: absolute; color: #555; font-size: 11px; font-weight: bold; pointer-events: none; }
+
+  .window {
+    position: absolute; background: repeating-linear-gradient(90deg, #87ceeb 0px, #87ceeb 8px, #fff 8px, #fff 10px);
+    border: 2px solid #555; z-index: 1;
+  }
+  .heater {
+    position: absolute; background: repeating-linear-gradient(90deg, #ccc 0px, #ccc 4px, #999 4px, #999 6px);
+    border: 1px solid #888; z-index: 1;
+  }
+  .door-frame { position: absolute; background: #8B4513; }
+
+  .furniture {
+    position: absolute; cursor: grab; display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: bold; color: #fff; text-align: center; border-radius: 3px;
+    box-shadow: 2px 2px 6px rgba(0,0,0,.3); z-index: 10; user-select: none; line-height: 1.1;
+  }
+  .furniture:active { cursor: grabbing; opacity: .85; }
+  .furniture.selected { outline: 2px solid #e94560; outline-offset: 1px; }
+  .furniture .rotate-handle {
+    position: absolute; top: -14px; right: -14px; width: 18px; height: 18px; background: #e94560;
+    border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center;
+    font-size: 11px; opacity: 0; transition: opacity .15s;
+  }
+  .furniture.selected .rotate-handle { opacity: 1; }
+  .furniture .delete-handle {
+    position: absolute; top: -14px; left: -14px; width: 18px; height: 18px; background: #c0392b;
+    border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center;
+    font-size: 11px; opacity: 0; transition: opacity .15s;
+  }
+  .furniture.selected .delete-handle { opacity: 1; }
+
+  .info-bar { font-size: 11px; color: #999; margin-top: 6px; text-align: center; }
+
+  .measure-group { position: absolute; z-index: 50; cursor: pointer; }
+  .measure-group svg { pointer-events: none; }
+  .measure-group .measure-hit { pointer-events: stroke; stroke-width: 14; stroke: transparent; cursor: pointer; }
+  .measure-group .measure-dot { position: absolute; width: 8px; height: 8px; background: #e94560; border-radius: 50%; pointer-events: none; transform: translate(-4px,-4px); }
+  .measure-group .measure-label {
+    position: absolute; pointer-events: none; background: #e94560; color: #fff;
+    padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: bold; white-space: nowrap;
+    transform: translate(-50%, -150%);
+  }
+  .measure-group.selected .measure-dot { background: #ff6b81; box-shadow: 0 0 6px #e94560; }
+  .measure-group.selected .measure-label { background: #ff6b81; }
+  .measure-group .measure-delete {
+    position: absolute; width: 18px; height: 18px; background: #c0392b; color: #fff;
+    border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    font-size: 11px; cursor: pointer; pointer-events: auto; opacity: 0; transition: opacity .15s;
+    transform: translate(-50%, -50%);
+  }
+  .measure-group.selected .measure-delete { opacity: 1; }
+  .measure-mode .room-container { cursor: crosshair; }
+  .measure-preview { position: absolute; pointer-events: none; z-index: 49; }
+</style>
+</head>
+<body>
+
+<div class="sidebar">
+  <h1>Möbelplaner</h1>
+  <p style="font-size:11px;color:#999;margin-bottom:8px;">Möbel in den Raum ziehen. Klicken zum Auswählen, dann drehen/löschen.</p>
+
+  <h2>Schlafen</h2>
+  <div class="furniture-item" draggable="true" data-w="200" data-h="140" data-color="#5b4a3f" data-label="Bett 200×140">Bett <span class="dim">200×140</span></div>
+  <div class="furniture-item" draggable="true" data-w="200" data-h="160" data-color="split:90:#7a6347:#b8956a" data-label="Ausziehbett">Ausziehbett <span class="dim">200×160</span></div>
+
+  <h2>Tische</h2>
+  <div class="furniture-item" draggable="true" data-w="150" data-h="75" data-color="#2c5282" data-label="Schreibtisch">Schreibtisch <span class="dim">150×75</span></div>
+  <div class="furniture-item" draggable="true" data-w="120" data-h="75" data-color="#2c5282" data-label="Schreibtisch klein">Schreibtisch klein <span class="dim">120×75</span></div>
+
+  <h2>Schränke</h2>
+  <div class="furniture-item" draggable="true" data-w="80" data-h="40" data-color="#7a5c7e" data-label="Kommode">Kommode <span class="dim">80×40</span></div>
+  <div class="furniture-item" draggable="true" data-w="40" data-h="40" data-color="#8a6c8e" data-label="Regal">Regal <span class="dim">40×40</span></div>
+  <div class="furniture-item" draggable="true" data-w="56" data-h="35" data-color="#6b4c6e" data-label="Druckerschrank">Druckerschrank <span class="dim">56×35</span></div>
+  <div class="furniture-item" draggable="true" data-w="80" data-h="40" data-color="#4a6e6b" data-label="Billy Vitrine">Billy Vitrine <span class="dim">80×40</span></div>
+
+  <h2>Sonstiges</h2>
+  <div class="furniture-item" draggable="true" data-w="45" data-h="45" data-color="#666" data-label="Stuhl">Stuhl <span class="dim">45×45</span></div>
+</div>
+
+<div class="main">
+  <div class="controls">
+    <button onclick="toggleGrid()">Raster an/aus</button>
+    <button id="measureBtn" onclick="toggleMeasure()">📏 Messen</button>
+    <button onclick="clearMeasurements()">Messungen löschen</button>
+  </div>
+
+  <div class="room-wrapper">
+    <div class="room-title">VARIANTE A <button class="controls" style="display:inline;margin-left:8px;font-size:10px;padding:2px 8px;" onclick="rooms[0].clearAll()">Löschen</button></div>
+    <div class="room-container" id="room0"></div>
+  </div>
+
+  <div class="room-wrapper">
+    <div class="room-title">VARIANTE B <button class="controls" style="display:inline;margin-left:8px;font-size:10px;padding:2px 8px;" onclick="rooms[1].clearAll()">Löschen</button></div>
+    <div class="room-container" id="room1"></div>
+  </div>
+
+  <div class="info-bar" id="info">Raum: 405 × 203 cm | Möbel aus der Seitenleiste in den Raum ziehen</div>
+</div>
+
+<script>
+const ROOM_W_CM = 405;
+const ROOM_H_CM = 203;
+const SCALE = 2.0;
+
+let showGrid = true;
+let selectedEl = null;
+let furnitureId = 0;
+const rooms = [];
+
+// --- Zollstock / Messen ---
+let measureMode = false;
+let measureStart = null; // {x, y, roomEl}
+let measurePreviewLine = null;
+
+function toggleMeasure() {
+  measureMode = !measureMode;
+  measureStart = null;
+  document.getElementById('measureBtn').classList.toggle('active', measureMode);
+  document.body.classList.toggle('measure-mode', measureMode);
+  removeMeasurePreview();
+  document.getElementById('info').textContent = measureMode
+    ? '📏 Messen: Ersten Punkt im Raum klicken'
+    : `Raum: ${ROOM_W_CM} × ${ROOM_H_CM} cm`;
+}
+
+function clearMeasurements() {
+  document.querySelectorAll('.measure-group').forEach(e => e.remove());
+  selectedMeasure = null;
+  measureStart = null;
+  removeMeasurePreview();
+  rooms.forEach(r => { localStorage.removeItem(r.el.id + '_measures'); });
+}
+
+function removeMeasurePreview() {
+  document.querySelectorAll('.measure-preview, .measure-dot.preview').forEach(e => e.remove());
+  measurePreviewLine = null;
+}
+
+function handleMeasureClick(e, roomEl) {
+  if (!measureMode) return false;
+  const rect = roomEl.getBoundingClientRect();
+  const px = e.clientX - rect.left;
+  const py = e.clientY - rect.top;
+
+  // Snap to 5cm grid
+  const snap = 5 * SCALE;
+  const sx = Math.round(px / snap) * snap;
+  const sy = Math.round(py / snap) * snap;
+
+  if (!measureStart || measureStart.roomEl !== roomEl) {
+    // First point
+    measureStart = { x: sx, y: sy, roomEl };
+    const dot = document.createElement('div');
+    dot.className = 'measure-dot preview';
+    dot.style.left = sx + 'px'; dot.style.top = sy + 'px';
+    roomEl.appendChild(dot);
+    document.getElementById('info').textContent = '📏 Zweiten Punkt klicken';
+  } else {
+    // Second point – draw permanent line
+    const x1 = measureStart.x, y1 = measureStart.y;
+    const x2 = sx, y2 = sy;
+    removeMeasurePreview();
+    drawMeasurement(roomEl, x1, y1, x2, y2);
+    measureStart = null;
+    document.getElementById('info').textContent = '📏 Messen: Nächsten Startpunkt klicken (oder Modus beenden)';
+  }
+  return true;
+}
+
+let selectedMeasure = null;
+
+function selectMeasure(group) {
+  if (selectedMeasure) selectedMeasure.classList.remove('selected');
+  selectedMeasure = group;
+  group.classList.add('selected');
+}
+
+function deselectMeasure() {
+  if (selectedMeasure) { selectedMeasure.classList.remove('selected'); selectedMeasure = null; }
+}
+
+function deleteMeasure(group) {
+  const roomEl = group.parentElement;
+  group.remove();
+  selectedMeasure = null;
+  saveMeasurements(roomEl);
+}
+
+function drawMeasurement(roomEl, x1, y1, x2, y2, skipSave) {
+  const dxPx = x2 - x1, dyPx = y2 - y1;
+  const lenPx = Math.sqrt(dxPx * dxPx + dyPx * dyPx);
+  const lenCm = Math.round(lenPx / SCALE);
+
+  const group = document.createElement('div');
+  group.className = 'measure-group';
+  group.dataset.x1 = x1; group.dataset.y1 = y1;
+  group.dataset.x2 = x2; group.dataset.y2 = y2;
+  group.style.left = '0'; group.style.top = '0';
+  group.style.width = '100%'; group.style.height = '100%';
+
+  // Dots
+  const d1 = document.createElement('div');
+  d1.className = 'measure-dot'; d1.style.left = x1 + 'px'; d1.style.top = y1 + 'px';
+  group.appendChild(d1);
+  const d2 = document.createElement('div');
+  d2.className = 'measure-dot'; d2.style.left = x2 + 'px'; d2.style.top = y2 + 'px';
+  group.appendChild(d2);
+
+  // SVG line + invisible hit area
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.style.position = 'absolute'; svg.style.left = '0'; svg.style.top = '0';
+  svg.style.width = '100%'; svg.style.height = '100%'; svg.style.overflow = 'visible';
+  const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  line.setAttribute('x1', x1); line.setAttribute('y1', y1);
+  line.setAttribute('x2', x2); line.setAttribute('y2', y2);
+  line.setAttribute('stroke', '#e94560'); line.setAttribute('stroke-width', '2');
+  line.setAttribute('stroke-dasharray', '6,3');
+  svg.appendChild(line);
+  const hit = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  hit.classList.add('measure-hit');
+  hit.setAttribute('x1', x1); hit.setAttribute('y1', y1);
+  hit.setAttribute('x2', x2); hit.setAttribute('y2', y2);
+  svg.appendChild(hit);
+  group.appendChild(svg);
+
+  // Label
+  const lbl = document.createElement('div');
+  lbl.className = 'measure-label';
+  lbl.style.left = (x1 + x2) / 2 + 'px'; lbl.style.top = (y1 + y2) / 2 + 'px';
+  lbl.textContent = `${lenCm} cm`;
+  group.appendChild(lbl);
+
+  // Delete button at midpoint
+  const del = document.createElement('div');
+  del.className = 'measure-delete';
+  del.style.left = (x1 + x2) / 2 + 'px'; del.style.top = (y1 + y2) / 2 + 20 + 'px';
+  del.textContent = '✕';
+  del.addEventListener('click', e => { e.stopPropagation(); deleteMeasure(group); });
+  group.appendChild(del);
+
+  // Click to select
+  group.addEventListener('click', e => {
+    e.stopPropagation();
+    if (!measureMode) selectMeasure(group);
+  });
+
+  roomEl.appendChild(group);
+  if (!skipSave) saveMeasurements(roomEl);
+}
+
+// Persistence for measurements
+function saveMeasurements(roomEl) {
+  const key = roomEl.id + '_measures';
+  const items = [];
+  roomEl.querySelectorAll('.measure-group').forEach(g => {
+    items.push({ x1: +g.dataset.x1, y1: +g.dataset.y1, x2: +g.dataset.x2, y2: +g.dataset.y2 });
+  });
+  localStorage.setItem(key, JSON.stringify(items));
+}
+
+function loadMeasurements(roomEl) {
+  const raw = localStorage.getItem(roomEl.id + '_measures');
+  if (!raw) return;
+  try {
+    JSON.parse(raw).forEach(m => drawMeasurement(roomEl, m.x1, m.y1, m.x2, m.y2, true));
+  } catch(e) {}
+}
+
+// Live preview line while measuring
+document.addEventListener('mousemove', e => {
+  if (!measureMode || !measureStart) return;
+  removeMeasurePreview();
+  const rect = measureStart.roomEl.getBoundingClientRect();
+  const px = e.clientX - rect.left, py = e.clientY - rect.top;
+  // Clamp inside room
+  if (px < 0 || py < 0 || px > rect.width || py > rect.height) return;
+
+  const snap = 5 * SCALE;
+  const sx = Math.round(px / snap) * snap;
+  const sy = Math.round(py / snap) * snap;
+  const x1 = measureStart.x, y1 = measureStart.y;
+
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.classList.add('measure-preview');
+  svg.style.left = '0'; svg.style.top = '0'; svg.style.width = '100%'; svg.style.height = '100%'; svg.style.position = 'absolute';
+  const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  line.setAttribute('x1', x1); line.setAttribute('y1', y1);
+  line.setAttribute('x2', sx); line.setAttribute('y2', sy);
+  line.setAttribute('stroke', '#e94560'); line.setAttribute('stroke-width', '1'); line.setAttribute('stroke-dasharray', '4,4'); line.setAttribute('opacity', '0.5');
+  svg.appendChild(line);
+  measureStart.roomEl.appendChild(svg);
+
+  const dxPx = sx - x1, dyPx = sy - y1;
+  const lenCm = Math.round(Math.sqrt(dxPx * dxPx + dyPx * dyPx) / SCALE);
+  document.getElementById('info').textContent = `📏 ${lenCm} cm`;
+});
+
+class Room {
+  constructor(id, storageKey) {
+    this.el = document.getElementById(id);
+    this.storageKey = storageKey;
+    this.el.style.width = ROOM_W_CM * SCALE + 'px';
+    this.el.style.height = ROOM_H_CM * SCALE + 'px';
+    this.drawRoom();
+    this.setupDrop();
+    this.setupDeselect();
+    this.loadState();
+    loadMeasurements(this.el);
+  }
+
+  drawRoom() {
+    this.addLabel(ROOM_W_CM / 2, -10, `${ROOM_W_CM} cm`, 'top');
+    this.addLabel(-20, ROOM_H_CM / 2, `${ROOM_H_CM} cm`, 'left');
+    const fensterTop = 46;
+    const fensterH = ROOM_H_CM - fensterTop;
+    this.addElement('window', ROOM_W_CM - 8, fensterTop, 8, fensterH, `Fenster`);
+    this.addElement('heater', ROOM_W_CM - 2, fensterTop + 10, 2, fensterH - 20, 'Heizung');
+    this.drawDoor();
+    this.updateGrid();
+  }
+
+  addLabel(xCm, yCm, text, pos) {
+    const lbl = document.createElement('div');
+    lbl.className = 'wall-label';
+    lbl.textContent = text;
+    if (pos === 'top') {
+      lbl.style.left = xCm * SCALE + 'px'; lbl.style.top = '-20px'; lbl.style.transform = 'translateX(-50%)';
+    } else {
+      lbl.style.left = '-50px'; lbl.style.top = yCm * SCALE + 'px'; lbl.style.transform = 'translateY(-50%)';
+    }
+    this.el.appendChild(lbl);
+  }
+
+  addElement(cls, xCm, yCm, wCm, hCm, title) {
+    const el = document.createElement('div');
+    el.className = cls;
+    el.style.left = xCm * SCALE + 'px'; el.style.top = yCm * SCALE + 'px';
+    el.style.width = wCm * SCALE + 'px'; el.style.height = hCm * SCALE + 'px';
+    el.title = title;
+    this.el.appendChild(el);
+  }
+
+  drawDoor() {
+    const doorWidth = 92.5, wallGap = 8, doorThick = 6;
+    const doorTop = ROOM_H_CM - wallGap - doorWidth;
+    const frame = document.createElement('div');
+    frame.className = 'door-frame';
+    frame.style.left = '0px'; frame.style.top = doorTop * SCALE + 'px';
+    frame.style.width = doorThick * SCALE + 'px'; frame.style.height = doorWidth * SCALE + 'px';
+    frame.title = `Tür ${doorWidth}cm`;
+    this.el.appendChild(frame);
+
+    const arc = document.createElement('canvas');
+    arc.width = doorWidth * SCALE; arc.height = doorWidth * SCALE;
+    arc.style.position = 'absolute'; arc.style.left = '0px'; arc.style.top = doorTop * SCALE + 'px';
+    arc.style.pointerEvents = 'none'; arc.style.zIndex = '1';
+    const ctx = arc.getContext('2d');
+    ctx.beginPath();
+    ctx.arc(0, doorWidth * SCALE, doorWidth * SCALE, -Math.PI/2, 0);
+    ctx.strokeStyle = '#8B4513'; ctx.lineWidth = 2; ctx.setLineDash([6, 4]); ctx.stroke();
+    this.el.appendChild(arc);
+
+    const lbl = document.createElement('div');
+    lbl.className = 'wall-label'; lbl.style.left = '-60px';
+    lbl.style.top = (doorTop + doorWidth/2) * SCALE + 'px';
+    lbl.style.transform = 'translateY(-50%)'; lbl.textContent = `Tür ${doorWidth}cm`; lbl.style.color = '#8B4513';
+    this.el.appendChild(lbl);
+  }
+
+  updateGrid() {
+    if (showGrid) {
+      const s = 5 * SCALE;
+      this.el.style.backgroundImage = `linear-gradient(to right, rgba(0,0,0,.06) 1px, transparent 1px), linear-gradient(to bottom, rgba(0,0,0,.06) 1px, transparent 1px)`;
+      this.el.style.backgroundSize = `${s}px ${s}px`;
+    } else {
+      this.el.style.backgroundImage = 'none';
+    }
+  }
+
+  setupDrop() {
+    this.el.addEventListener('dragover', e => e.preventDefault());
+    this.el.addEventListener('drop', e => {
+      e.preventDefault();
+      const data = JSON.parse(e.dataTransfer.getData('text/plain'));
+      const rect = this.el.getBoundingClientRect();
+      const x = (e.clientX - rect.left) / SCALE - data.w / 2;
+      const y = (e.clientY - rect.top) / SCALE - data.h / 2;
+      this.createFurniture(data, Math.max(0, x), Math.max(0, y));
+    });
+  }
+
+  setupDeselect() {
+    this.el.addEventListener('click', e => {
+      if (handleMeasureClick(e, this.el)) return;
+      if (e.target === this.el) {
+        if (selectedEl) { selectedEl.classList.remove('selected'); selectedEl = null; }
+        deselectMeasure();
+      }
+    });
+  }
+
+  createFurniture(data, xCm, yCm, rotation) {
+    const room = this;
+    const el = document.createElement('div');
+    el.className = 'furniture';
+    el.id = 'f' + (++furnitureId);
+    el.dataset.roomKey = this.storageKey;
+    el.style.left = xCm * SCALE + 'px'; el.style.top = yCm * SCALE + 'px';
+    el.style.width = data.w * SCALE + 'px'; el.style.height = data.h * SCALE + 'px';
+
+    if (data.color && data.color.startsWith('split:')) {
+      const parts = data.color.split(':');
+      const splitH = +parts[1], c1 = parts[2], c2 = parts[3];
+      const pct = (splitH / data.h * 100).toFixed(1);
+      el.style.background = `linear-gradient(to bottom, ${c1} 0%, ${c1} calc(${pct}% - 1px), #fff calc(${pct}% - 1px), #fff calc(${pct}% + 1px), ${c2} calc(${pct}% + 1px), ${c2} 100%)`;
+      el.dataset.splitColor = data.color;
+    } else {
+      el.style.background = data.color;
+    }
+
+    el.dataset.w = data.w; el.dataset.h = data.h;
+    el.dataset.rotation = rotation || 0;
+    if (rotation) el.style.transform = `rotate(${rotation}deg)`;
+    el.innerHTML = `${data.label}<span class="rotate-handle" title="Drehen">↻</span><span class="delete-handle" title="Löschen">✕</span>`;
+
+    let dragging = false, offX, offY;
+
+    el.addEventListener('mousedown', e => {
+      if (e.target.classList.contains('rotate-handle')) { rotateFurniture(el); room.saveState(); return; }
+      if (e.target.classList.contains('delete-handle')) { el.remove(); selectedEl = null; room.saveState(); return; }
+      if (selectedEl) selectedEl.classList.remove('selected');
+      selectedEl = el; el.classList.add('selected');
+      dragging = true;
+      const r = el.getBoundingClientRect();
+      offX = e.clientX - r.left; offY = e.clientY - r.top;
+      e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', e => {
+      if (!dragging) return;
+      const rr = room.el.getBoundingClientRect();
+      let nx = e.clientX - rr.left - offX, ny = e.clientY - rr.top - offY;
+      const snap = 5 * SCALE;
+      nx = Math.round(nx / snap) * snap; ny = Math.round(ny / snap) * snap;
+      const rot = +el.dataset.rotation % 360;
+      const w = el.offsetWidth, h = el.offsetHeight;
+      if (rot === 90 || rot === 270) {
+        const dx = (w - h) / 2;
+        nx = Math.max(-dx, Math.min(nx, rr.width - w + dx));
+        ny = Math.max(dx, Math.min(ny, rr.height - h - dx));
+      } else {
+        nx = Math.max(0, Math.min(nx, rr.width - w));
+        ny = Math.max(0, Math.min(ny, rr.height - h));
+      }
+      el.style.left = nx + 'px'; el.style.top = ny + 'px';
+      const cmX = Math.round(nx / SCALE), cmY = Math.round(ny / SCALE);
+      document.getElementById('info').textContent = `Position: ${cmX}, ${cmY} cm | Raum: ${ROOM_W_CM} × ${ROOM_H_CM} cm`;
+    });
+
+    document.addEventListener('mouseup', () => { if (dragging) { dragging = false; room.saveState(); } });
+    this.el.appendChild(el);
+  }
+
+  saveState() {
+    const items = [];
+    this.el.querySelectorAll('.furniture').forEach(el => {
+      items.push({
+        w: +el.dataset.w, h: +el.dataset.h,
+        color: el.dataset.splitColor || el.style.background,
+        label: el.childNodes[0].textContent.trim(),
+        x: parseFloat(el.style.left) / SCALE, y: parseFloat(el.style.top) / SCALE,
+        rotation: +el.dataset.rotation
+      });
+    });
+    localStorage.setItem(this.storageKey, JSON.stringify(items));
+  }
+
+  loadState() {
+    const raw = localStorage.getItem(this.storageKey);
+    if (!raw) return;
+    try {
+      JSON.parse(raw).forEach(item => {
+        this.createFurniture({ w: item.w, h: item.h, color: item.color, label: item.label }, item.x, item.y, item.rotation);
+      });
+    } catch(e) {}
+  }
+
+  clearAll() {
+    this.el.querySelectorAll('.furniture').forEach(f => f.remove());
+    selectedEl = null;
+    this.saveState();
+  }
+}
+
+function rotateFurniture(el) {
+  let rot = (+el.dataset.rotation + 90) % 360;
+  el.dataset.rotation = rot;
+  el.style.transform = `rotate(${rot}deg)`;
+}
+
+function toggleGrid() {
+  showGrid = !showGrid;
+  rooms.forEach(r => r.updateGrid());
+}
+
+// Drag from sidebar
+document.querySelectorAll('.furniture-item').forEach(item => {
+  item.addEventListener('dragstart', e => {
+    e.dataTransfer.setData('text/plain', JSON.stringify({
+      w: +item.dataset.w, h: +item.dataset.h,
+      color: item.dataset.color, label: item.dataset.label
+    }));
+  });
+});
+
+// Keyboard
+document.addEventListener('keydown', e => {
+  if (e.key === 'Delete' || e.key === 'Backspace') {
+    if (selectedMeasure) { deleteMeasure(selectedMeasure); return; }
+    if (selectedEl) { const r = rooms.find(r => r.storageKey === selectedEl.dataset.roomKey); selectedEl.remove(); selectedEl = null; if (r) r.saveState(); }
+    return;
+  }
+  if (e.key === 'r' && selectedEl) {
+    const r = rooms.find(r => r.storageKey === selectedEl.dataset.roomKey);
+    rotateFurniture(selectedEl); if (r) r.saveState();
+  }
+});
+
+// Init both rooms
+rooms.push(new Room('room0', 'grundriss_a'));
+rooms.push(new Room('room1', 'grundriss_b'));
+</script>
+</body>
+</html>
