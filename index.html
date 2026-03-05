@@ -198,7 +198,7 @@ function clearMeasurements() {
   selectedMeasure = null;
   measureStart = null;
   removeMeasurePreview();
-  rooms.forEach(r => { localStorage.removeItem(r.el.id + '_measures'); });
+  saveAllToUrl();
 }
 
 function removeMeasurePreview() {
@@ -325,7 +325,6 @@ function saveMeasurements(roomEl) {
   roomEl.querySelectorAll('.measure-group').forEach(g => {
     items.push({ x1: +g.dataset.x1, y1: +g.dataset.y1, x2: +g.dataset.x2, y2: +g.dataset.y2 });
   });
-  localStorage.setItem(key, JSON.stringify(items));
   saveAllToUrl();
 }
 
@@ -333,7 +332,8 @@ function loadMeasurements(roomEl) {
   const urlState = getUrlState();
   const room = rooms.find(r => r.el === roomEl);
   const urlKey = room ? room.storageKey + '_m' : null;
-  const raw = (urlState && urlKey && urlState[urlKey]) ? JSON.stringify(urlState[urlKey]) : localStorage.getItem(roomEl.id + '_measures');
+  if (!urlState || !urlKey || !urlState[urlKey]) return;
+  const raw = JSON.stringify(urlState[urlKey]);
   if (!raw) return;
   try {
     JSON.parse(raw).forEach(m => drawMeasurement(roomEl, m.x1, m.y1, m.x2, m.y2, true));
@@ -546,14 +546,14 @@ class Room {
         rotation: +el.dataset.rotation
       });
     });
-    localStorage.setItem(this.storageKey, JSON.stringify(items));
     saveAllToUrl();
   }
 
   loadState() {
     const urlState = getUrlState();
     const raw = urlState ? urlState[this.storageKey] : null;
-    const src = raw ? JSON.stringify(raw) : localStorage.getItem(this.storageKey);
+    if (!raw) return;
+    const src = JSON.stringify(raw);
     if (!src) return;
     try {
       JSON.parse(src).forEach(item => {
