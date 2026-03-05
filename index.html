@@ -112,8 +112,6 @@
   <div class="furniture-item" draggable="true" data-w="80" data-h="40" data-color="#7a5c7e" data-label="Kommode">Kommode <span class="dim">80×40</span></div>
   <div class="furniture-item" draggable="true" data-w="40" data-h="40" data-color="#8a6c8e" data-label="Regal">Regal <span class="dim">40×40</span></div>
   <div class="furniture-item" draggable="true" data-w="56" data-h="35" data-color="#6b4c6e" data-label="Druckerschrank">Druckerschrank <span class="dim">56×35</span></div>
-  <div class="furniture-item" draggable="true" data-w="80" data-h="40" data-color="#4a6e6b" data-label="Billy Vitrine">Billy Vitrine <span class="dim">80×40</span></div>
-
   <h2>Sonstiges</h2>
   <div class="furniture-item" draggable="true" data-w="45" data-h="45" data-color="#666" data-label="Stuhl">Stuhl <span class="dim">45×45</span></div>
 </div>
@@ -147,6 +145,37 @@ let showGrid = true;
 let selectedEl = null;
 let furnitureId = 0;
 const rooms = [];
+
+// --- URL State ---
+function getUrlState() {
+  const hash = location.hash.slice(1);
+  if (!hash) return null;
+  try { return JSON.parse(decodeURIComponent(hash)); } catch(e) { return null; }
+}
+
+function saveAllToUrl() {
+  const state = {};
+  rooms.forEach(r => {
+    const items = [];
+    r.el.querySelectorAll('.furniture').forEach(el => {
+      items.push({
+        w: +el.dataset.w, h: +el.dataset.h,
+        color: el.dataset.splitColor || el.style.background,
+        label: el.childNodes[0].textContent.trim(),
+        x: parseFloat(el.style.left) / SCALE, y: parseFloat(el.style.top) / SCALE,
+        rotation: +el.dataset.rotation
+      });
+    });
+    state[r.storageKey] = items;
+    // measurements
+    const measures = [];
+    r.el.querySelectorAll('.measure-group').forEach(g => {
+      measures.push({ x1: +g.dataset.x1, y1: +g.dataset.y1, x2: +g.dataset.x2, y2: +g.dataset.y2 });
+    });
+    if (measures.length) state[r.storageKey + '_m'] = measures;
+  });
+  history.replaceState(null, '', '#' + encodeURIComponent(JSON.stringify(state)));
+}
 
 // --- Zollstock / Messen ---
 let measureMode = false;
@@ -297,10 +326,14 @@ function saveMeasurements(roomEl) {
     items.push({ x1: +g.dataset.x1, y1: +g.dataset.y1, x2: +g.dataset.x2, y2: +g.dataset.y2 });
   });
   localStorage.setItem(key, JSON.stringify(items));
+  saveAllToUrl();
 }
 
 function loadMeasurements(roomEl) {
-  const raw = localStorage.getItem(roomEl.id + '_measures');
+  const urlState = getUrlState();
+  const room = rooms.find(r => r.el === roomEl);
+  const urlKey = room ? room.storageKey + '_m' : null;
+  const raw = (urlState && urlKey && urlState[urlKey]) ? JSON.stringify(urlState[urlKey]) : localStorage.getItem(roomEl.id + '_measures');
   if (!raw) return;
   try {
     JSON.parse(raw).forEach(m => drawMeasurement(roomEl, m.x1, m.y1, m.x2, m.y2, true));
@@ -514,13 +547,16 @@ class Room {
       });
     });
     localStorage.setItem(this.storageKey, JSON.stringify(items));
+    saveAllToUrl();
   }
 
   loadState() {
-    const raw = localStorage.getItem(this.storageKey);
-    if (!raw) return;
+    const urlState = getUrlState();
+    const raw = urlState ? urlState[this.storageKey] : null;
+    const src = raw ? JSON.stringify(raw) : localStorage.getItem(this.storageKey);
+    if (!src) return;
     try {
-      JSON.parse(raw).forEach(item => {
+      JSON.parse(src).forEach(item => {
         this.createFurniture({ w: item.w, h: item.h, color: item.color, label: item.label }, item.x, item.y, item.rotation);
       });
     } catch(e) {}
