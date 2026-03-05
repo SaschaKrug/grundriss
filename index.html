@@ -12,6 +12,16 @@
     width: 220px; min-width: 220px; background: #16213e; padding: 16px; display: flex; flex-direction: column; gap: 8px;
     border-right: 1px solid #0f3460; overflow-y: auto;
   }
+  @media (max-width: 700px) {
+    body { flex-direction: column; overflow: auto; height: auto; min-height: 100vh; }
+    .sidebar { width: 100%; min-width: 100%; flex-direction: row; flex-wrap: wrap; padding: 10px; border-right: none; border-bottom: 1px solid #0f3460; }
+    .sidebar h1 { width: 100%; font-size: 14px; margin-bottom: 4px; }
+    .sidebar h2 { width: 100%; font-size: 12px; margin: 4px 0 2px; }
+    .sidebar p { width: 100%; margin-bottom: 4px; }
+    .furniture-item { padding: 6px 8px; font-size: 11px; }
+    .main { padding: 10px; overflow-x: auto; }
+    .room-container { transform-origin: top left; }
+  }
   .sidebar h2 { font-size: 14px; color: #e94560; margin: 8px 0 4px; text-transform: uppercase; letter-spacing: 1px; }
   .sidebar h1 { font-size: 16px; margin-bottom: 12px; color: #fff; }
 
@@ -146,35 +156,96 @@ let selectedEl = null;
 let furnitureId = 0;
 const rooms = [];
 
-// --- URL State ---
+// --- URL State (plain text, human-readable) ---
+// Format: #grid=1&a=Label,w,h,x,y,rot,color|...|...&b=...&ma=x1,y1,x2,y2|...&mb=...
+// Colors: hex without # (e.g. 5b4a3f), split as split-90-7a6347-b8956a
+
+function encodeColor(c) {
+  if (!c) return '';
+  if (c.startsWith('split:')) return c.replace(/[:#]/g, '-').slice(1); // -90-7a6347-b8956a
+  if (c.startsWith('#')) return c.slice(1);
+  // browser rgb() -> hex
+  const m = c.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+  if (m) return [m[1],m[2],m[3]].map(v => (+v).toString(16).padStart(2,'0')).join('');
+  return c;
+}
+
+function decodeColor(s) {
+  if (!s) return '#888';
+  if (s.startsWith('-')) return 'split:' + s.slice(1).replace(/-/g, m => ':').replace(/:/g, (m, i, str) => {
+    // split:-90-7a6347-b8956a -> split:90:#7a6347:#b8956a
+    return m;
+  });
+  // handle split format: -90-7a6347-b8956a
+  if (s.match(/^-?\d+-/)) {
+    const parts = s.replace(/^-/, '').split('-');
+    return `split:${parts[0]}:#${parts[1]}:#${parts[2]}`;
+  }
+  return '#' + s;
+}
+
 function getUrlState() {
   const hash = location.hash.slice(1);
   if (!hash) return null;
-  try { return JSON.parse(decodeURIComponent(hash)); } catch(e) { return null; }
+  const params = {};
+  hash.split('&').forEach(pair => {
+    const eq = pair.indexOf('=');
+    if (eq < 0) return;
+    params[decodeURIComponent(pair.slice(0, eq))] = decodeURIComponent(pair.slice(eq + 1));
+  });
+  return params;
+}
+
+function parseFurnitureParam(str) {
+  if (!str) return [];
+  return str.split('|').filter(Boolean).map(item => {
+    // label,w,h,x,y,rot,color — but label may contain commas, so split from end
+    const parts = item.split(',');
+    // color is last, rot before, y before, x before, h before, w before, rest is label
+    if (parts.length < 7) return null;
+    const color = parts.pop();
+    const rot = +parts.pop();
+    const y = +parts.pop();
+    const x = +parts.pop();
+    const h = +parts.pop();
+    const w = +parts.pop();
+    const label = parts.join(',');
+    return { label, w, h, x, y, rotation: rot, color: decodeColor(color) };
+  }).filter(Boolean);
+}
+
+function parseMeasureParam(str) {
+  if (!str) return [];
+  return str.split('|').filter(Boolean).map(item => {
+    const [x1,y1,x2,y2] = item.split(',').map(Number);
+    return { x1, y1, x2, y2 };
+  });
 }
 
 function saveAllToUrl() {
-  const state = {};
+  const parts = [];
+  parts.push('grid=' + (showGrid ? '1' : '0'));
   rooms.forEach(r => {
+    const key = r.storageKey === 'grundriss_a' ? 'a' : 'b';
     const items = [];
     r.el.querySelectorAll('.furniture').forEach(el => {
-      items.push({
-        w: +el.dataset.w, h: +el.dataset.h,
-        color: el.dataset.splitColor || el.style.background,
-        label: el.childNodes[0].textContent.trim(),
-        x: parseFloat(el.style.left) / SCALE, y: parseFloat(el.style.top) / SCALE,
-        rotation: +el.dataset.rotation
-      });
+      const label = el.childNodes[0].textContent.trim();
+      const w = +el.dataset.w, h = +el.dataset.h;
+      const x = Math.round(parseFloat(el.style.left) / SCALE);
+      const y = Math.round(parseFloat(el.style.top) / SCALE);
+      const rot = +el.dataset.rotation;
+      const color = encodeColor(el.dataset.splitColor || el.dataset.origColor || el.style.background);
+      items.push(`${label},${w},${h},${x},${y},${rot},${color}`);
     });
-    state[r.storageKey] = items;
+    parts.push(key + '=' + items.join('|'));
     // measurements
     const measures = [];
     r.el.querySelectorAll('.measure-group').forEach(g => {
-      measures.push({ x1: +g.dataset.x1, y1: +g.dataset.y1, x2: +g.dataset.x2, y2: +g.dataset.y2 });
+      measures.push(`${g.dataset.x1},${g.dataset.y1},${g.dataset.x2},${g.dataset.y2}`);
     });
-    if (measures.length) state[r.storageKey + '_m'] = measures;
+    if (measures.length) parts.push('m' + key + '=' + measures.join('|'));
   });
-  history.replaceState(null, '', '#' + encodeURIComponent(JSON.stringify(state)));
+  history.replaceState(null, '', '#' + parts.join('&'));
 }
 
 // --- Zollstock / Messen ---
@@ -329,15 +400,12 @@ function saveMeasurements(roomEl) {
 }
 
 function loadMeasurements(roomEl) {
-  const urlState = getUrlState();
+  const params = getUrlState();
+  if (!params) return;
   const room = rooms.find(r => r.el === roomEl);
-  const urlKey = room ? room.storageKey + '_m' : null;
-  if (!urlState || !urlKey || !urlState[urlKey]) return;
-  const raw = JSON.stringify(urlState[urlKey]);
-  if (!raw) return;
-  try {
-    JSON.parse(raw).forEach(m => drawMeasurement(roomEl, m.x1, m.y1, m.x2, m.y2, true));
-  } catch(e) {}
+  if (!room) return;
+  const key = 'm' + (room.storageKey === 'grundriss_a' ? 'a' : 'b');
+  parseMeasureParam(params[key]).forEach(m => drawMeasurement(roomEl, m.x1, m.y1, m.x2, m.y2, true));
 }
 
 // Live preview line while measuring
@@ -492,28 +560,24 @@ class Room {
       el.style.background = data.color;
     }
 
-    el.dataset.w = data.w; el.dataset.h = data.h;
+    el.dataset.w = data.w; el.dataset.h = data.h; el.dataset.origColor = data.color;
     el.dataset.rotation = rotation || 0;
     if (rotation) el.style.transform = `rotate(${rotation}deg)`;
     el.innerHTML = `${data.label}<span class="rotate-handle" title="Drehen">↻</span><span class="delete-handle" title="Löschen">✕</span>`;
 
     let dragging = false, offX, offY;
 
-    el.addEventListener('mousedown', e => {
-      if (e.target.classList.contains('rotate-handle')) { rotateFurniture(el); room.saveState(); return; }
-      if (e.target.classList.contains('delete-handle')) { el.remove(); selectedEl = null; room.saveState(); return; }
+    function startDrag(clientX, clientY) {
       if (selectedEl) selectedEl.classList.remove('selected');
       selectedEl = el; el.classList.add('selected');
       dragging = true;
       const r = el.getBoundingClientRect();
-      offX = e.clientX - r.left; offY = e.clientY - r.top;
-      e.preventDefault();
-    });
-
-    document.addEventListener('mousemove', e => {
+      offX = clientX - r.left; offY = clientY - r.top;
+    }
+    function moveDrag(clientX, clientY) {
       if (!dragging) return;
       const rr = room.el.getBoundingClientRect();
-      let nx = e.clientX - rr.left - offX, ny = e.clientY - rr.top - offY;
+      let nx = clientX - rr.left - offX, ny = clientY - rr.top - offY;
       const snap = 5 * SCALE;
       nx = Math.round(nx / snap) * snap; ny = Math.round(ny / snap) * snap;
       const rot = +el.dataset.rotation % 360;
@@ -529,9 +593,27 @@ class Room {
       el.style.left = nx + 'px'; el.style.top = ny + 'px';
       const cmX = Math.round(nx / SCALE), cmY = Math.round(ny / SCALE);
       document.getElementById('info').textContent = `Position: ${cmX}, ${cmY} cm | Raum: ${ROOM_W_CM} × ${ROOM_H_CM} cm`;
-    });
+    }
+    function endDrag() { if (dragging) { dragging = false; room.saveState(); } }
 
-    document.addEventListener('mouseup', () => { if (dragging) { dragging = false; room.saveState(); } });
+    el.addEventListener('mousedown', e => {
+      if (e.target.classList.contains('rotate-handle')) { rotateFurniture(el); room.saveState(); return; }
+      if (e.target.classList.contains('delete-handle')) { el.remove(); selectedEl = null; room.saveState(); return; }
+      startDrag(e.clientX, e.clientY);
+      e.preventDefault();
+    });
+    document.addEventListener('mousemove', e => moveDrag(e.clientX, e.clientY));
+    document.addEventListener('mouseup', endDrag);
+
+    el.addEventListener('touchstart', e => {
+      if (e.target.classList.contains('rotate-handle')) { rotateFurniture(el); room.saveState(); return; }
+      if (e.target.classList.contains('delete-handle')) { el.remove(); selectedEl = null; room.saveState(); return; }
+      const t = e.touches[0];
+      startDrag(t.clientX, t.clientY);
+      e.preventDefault();
+    }, { passive: false });
+    document.addEventListener('touchmove', e => { if (dragging) { const t = e.touches[0]; moveDrag(t.clientX, t.clientY); e.preventDefault(); } }, { passive: false });
+    document.addEventListener('touchend', endDrag);
     this.el.appendChild(el);
   }
 
@@ -550,16 +632,13 @@ class Room {
   }
 
   loadState() {
-    const urlState = getUrlState();
-    const raw = urlState ? urlState[this.storageKey] : null;
-    if (!raw) return;
-    const src = JSON.stringify(raw);
-    if (!src) return;
-    try {
-      JSON.parse(src).forEach(item => {
-        this.createFurniture({ w: item.w, h: item.h, color: item.color, label: item.label }, item.x, item.y, item.rotation);
-      });
-    } catch(e) {}
+    const params = getUrlState();
+    if (!params) return;
+    const key = this.storageKey === 'grundriss_a' ? 'a' : 'b';
+    if (params.grid !== undefined) { showGrid = params.grid === '1'; this.updateGrid(); }
+    parseFurnitureParam(params[key]).forEach(item => {
+      this.createFurniture({ w: item.w, h: item.h, color: item.color, label: item.label }, item.x, item.y, item.rotation);
+    });
   }
 
   clearAll() {
@@ -578,15 +657,24 @@ function rotateFurniture(el) {
 function toggleGrid() {
   showGrid = !showGrid;
   rooms.forEach(r => r.updateGrid());
+  saveAllToUrl();
 }
 
-// Drag from sidebar
+// Drag from sidebar (desktop) + tap to add (mobile)
 document.querySelectorAll('.furniture-item').forEach(item => {
   item.addEventListener('dragstart', e => {
     e.dataTransfer.setData('text/plain', JSON.stringify({
       w: +item.dataset.w, h: +item.dataset.h,
       color: item.dataset.color, label: item.dataset.label
     }));
+  });
+  item.addEventListener('click', e => {
+    // On mobile (or desktop click), add to first room at center
+    const data = { w: +item.dataset.w, h: +item.dataset.h, color: item.dataset.color, label: item.dataset.label };
+    const targetRoom = rooms[0];
+    const cx = (ROOM_W_CM - data.w) / 2, cy = (ROOM_H_CM - data.h) / 2;
+    targetRoom.createFurniture(data, cx, cy);
+    targetRoom.saveState();
   });
 });
 
